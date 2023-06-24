@@ -117,5 +117,5 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("IP lookup completed. Unique IP results saved to %s and %s", ipOutputFile, aliasOutputFile)
+	fmt.Printf("IP lookup completed. Unique IP results saved to %s and %s\n", ipOutputFile, aliasOutputFile)
 }

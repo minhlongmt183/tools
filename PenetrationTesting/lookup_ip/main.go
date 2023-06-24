@@ -3,22 +3,30 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"io/ioutil"
 	"log"
-	"net"
 	"os"
+	"os/exec"
 	"strings"
 )
 
 // Function to perform IP lookup for a given domain and save the unique results to a file
 func lookupIP(domain string) string {
-	ip, err := net.LookupIP(domain)
+	// Check if 'dig' command is available
+	_, err := exec.LookPath("dig")
+	if err != nil {
+		return "Failed to execute 'dig' command. Make sure it is installed on your system."
+	}
+
+	// Execute 'dig' command
+	cmd := exec.Command("dig", "+short", domain)
+	output, err := cmd.Output()
 	if err != nil {
 		return fmt.Sprintf("Failed to lookup IP for %s", domain)
 	}
 
-	if len(ip) > 0 {
-		return fmt.Sprintf("%s: %s", domain, ip[0])
+	ip := strings.TrimSpace(string(output))
+	if ip != "" {
+		return fmt.Sprintf("%s: %s", domain, ip)
 	}
 
 	return ""
@@ -48,8 +56,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Clear the output file
-	err = ioutil.WriteFile(outputFile, nil, 0644)
+	err = os.WriteFile(outputFile, nil, 0644)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -83,7 +90,7 @@ func main() {
 			ipFile.Close()
 
 			if !exists {
-				err := ioutil.WriteFile(outputFile, []byte(result+"\n"), 0644)
+				err := os.WriteFile(outputFile, []byte(result+"\n"), 0644)
 				if err != nil {
 					log.Fatal(err)
 				}

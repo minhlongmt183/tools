@@ -1,21 +1,42 @@
 # IP Lookup
 
-This Go program performs IP lookup for a list of domains and saves the unique IP addresses to a file.
+IP Lookup is a Go program that performs IP lookup for a given list of domains and saves the unique IP addresses and aliases to separate files.
+
+## Prerequisites
+
+- Go (version 1.13 or higher)
+- dig command-line tool
 
 ## Usage
 
-1. Make sure you have Go installed on your machine.
+1. Clone the repository or download the source code.
 
-2. Clone the repository or copy the `main.go` file to your local environment.
+2. Navigate to the project directory.
 
-3. Create a file named `domains.txt` and add the list of domains you want to perform IP lookup for, with each domain on a new line.
+3. Ensure that the `domains.txt` file is present in the project directory. This file should contain a list of domains, with each domain on a new line.
 
-4. Run the program using the following command:
+4. Open a terminal and run the following command to build the Go program:
 
    ```shell
-   go run main.go domains.txt
-Replace domains.txt with the actual path to your domain file.
+   go build
+   ```
+   Run the program with the following command:
 
-The program will perform IP lookup for each domain, save the unique IP addresses to ip.txt, and display a completion message.   
+   ```shell
+   ./ip-lookup [domain_file]
+   ```
+   Replace [domain_file] with the path to the file containing the list of domains. For example:
+   
+   ```shell
+   ./ip-lookup domains.txt
+   ```
+   The program will perform IP lookup for each domain in the file and save the unique IP addresses to the ips.txt file, and aliases (non-IP results) to the alias.txt file.
+   
+   After the program finishes execution, you will see the following message:
+   
+   ```shell
+   IP lookup completed. Unique IP results saved to ips.txt and alias.txt
+   Open the ips.txt and alias.txt files to view the results.  
+   ```
 ## Author 
 This code was written by Edisc.

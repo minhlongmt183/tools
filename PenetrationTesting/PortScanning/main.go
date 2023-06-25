@@ -1,118 +1,106 @@
 package main
 
 import (
-	"bytes"
+	"bufio"
 	"flag"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
 	"sync"
+
+	"github.com/emirpasic/gods/maps/treemap"
+	"github.com/panjf2000/ants"
 )
 
-func main() {
-	// Define command-line flags
-	inputIP := flag.String("i", "", "target IP address")
-	outputDir := flag.String("o", "nmap_reports", "output directory for Nmap reports, default: nmap_reports ")
-	parallelism := flag.Int("t", 1, "number of parallel Nmap processes to run")
-
-	// Parse command-line flags
-	flag.Parse()
-
-	// Check that required flags are set
-	if *inputIP == "" {
-		fmt.Println("Usage: ./portscan -i IP -o nmap_reports -t <Amount of Nmap running at time>")
-		os.Exit(1)
-	}
-
-	// Create output directory if it doesn't exist
-	if _, err := os.Stat(*outputDir); os.IsNotExist(err) {
-		os.Mkdir(*outputDir, os.ModePerm)
-	}
-
-	// Define wait group to ensure all Nmap processes complete
-	var wg sync.WaitGroup
-
-	// Process targets in parallel
-	ip := *inputIP
-	output := *outputDir + "/"
-
-	runRustscan(ip, output)
-
-	//// Wait for available slot in semaphore
-	//semaphore := make(chan bool, *parallelism)
-	//semaphore <- true
-	//
-	//// Run Nmap process
-	//wg.Add(1)
-	//go func(target string) {
-	//	defer func() { <-semaphore }()
-	//	defer wg.Done()
-	//
-	//	report := fmt.Sprintf("%s/%s.xml", *outputDir, target)
-	//	args := []string{"-oX", report, target}
-	//	cmd := exec.Command("nmap", args...)
-	//	err := cmd.Run()
-	//	if err != nil {
-	//		fmt.Printf("Error running Nmap on %s: %v\n", target, err)
-	//	}
-	//}(ip)
-
-	// Wait for all Nmap processes to complete
-	fmt.Println(parallelism)
-	wg.Wait()
+type T struct {
+	IP    string
+	Ports string
 }
 
-func runRustscan(ip string, outputDir string) {
+func main() {
+	var ipPortListFileName string
+	var nmapOutputDirectory string
+	var parallelNmapAmount int
+	flag.StringVar(&ipPortListFileName, "i", "", "IP Address:Port list")
+	flag.StringVar(&nmapOutputDirectory, "o", "nmap_reports", "Nmap directory to store output")
+	flag.IntVar(&parallelNmapAmount, "t", 5, "Amount of Nmap running at the time")
+	flag.Parse()
 
-	// Check if rustscan is installed
-	_, err := exec.LookPath("rustscan")
-	if err != nil {
-		fmt.Println("rustscan is not installed. Please install it before running this program.")
-		return
-	}
-
-	// Run rustscan command and capture output
-	cmd := exec.Command("rustscan", "--scripts", "None", "--range", "1-65535", "-b", "20000", "-a", ip, "--accessible", "-t", "2500")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err = cmd.Run()
-	if err != nil {
-		log.Fatalf("Error running rustscan command: %v\nstderr: %s", err, stderr.String())
-	}
-
-	// Write raw output to file
-	err = os.WriteFile(outputDir+"raw-open-ports.txt", stdout.Bytes(), 0644)
-	if err != nil {
-		log.Fatalf("Error writing raw output to file: %v", err)
-	}
-
-	// Filter output to only include open ports
-	var openPorts []string
-	lines := strings.Split(stdout.String(), "\n")
-	for _, line := range lines {
-		if strings.HasPrefix(line, "Open ") {
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				openPorts = append(openPorts, fields[1])
-			}
+	if _, err := os.Stat(nmapOutputDirectory); os.IsNotExist(err) {
+		err := os.Mkdir(nmapOutputDirectory, os.ModePerm)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Failed to create output directory")
+			os.Exit(1)
 		}
 	}
 
-	// Write open ports to file
-	openPortsStr := strings.Join(openPorts, "\n")
-	file, err := os.Create(outputDir + "open-ports.txt")
-	if err != nil {
-		log.Fatalf("Error creating open-ports.txt file: %v", err)
-	}
-	defer file.Close()
+	var wg sync.WaitGroup
+	pool, _ := ants.NewPoolWithFunc(parallelNmapAmount, func(i interface{}) {
+		defer wg.Done()
+		input := i.(T)
+		nmapCmd := fmt.Sprintf("timeout -k 1m 10m nmap -sV -sC -v -T4 --open -p %s %s -oN %s/%s.txt -oX %s/%s.xml", input.Ports, input.IP,
+			nmapOutputDirectory, input.IP,
+			nmapOutputDirectory, input.IP)
+		cmd := exec.Command("bash", "-c", nmapCmd)
+		err := cmd.Run()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error %s: %s\n", cmd, err)
+		}
+	})
+	defer pool.Release()
 
-	_, err = file.WriteString(openPortsStr)
-	if err != nil {
-		log.Fatalf("Error writing open ports to file: %v", err)
-	}
+	ipMap := treemap.NewWithStringComparator()
+	loadIpAddressInfo(ipPortListFileName, ipMap)
 
-	fmt.Println("Done")
+	fmt.Fprintf(os.Stdout, "Total: %d\n", ipMap.Size())
+	current := 0
+	it := ipMap.Iterator()
+	for it.Next() {
+		key, value := it.Key(), it.Value()
+		ports := strings.Join(value.([]string), ",")
+		task := T{
+			IP:    key.(string),
+			Ports: ports,
+		}
+		current++
+		fmt.Fprintf(os.Stdout, "Current progress: %d/%d\n", current, ipMap.Size())
+		wg.Add(1)
+		pool.Invoke(task)
+	}
+	wg.Wait()
+}
+
+func loadIpAddressInfo(ipPortFile string, ipInfoMap *treemap.Map) {
+	f, err := os.Open(ipPortFile)
+	if err != nil {
+		log.Fatalf("Failed to open ipAddressList: %s", err)
+	}
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+
+		if strings.HasPrefix(line, "http") {
+			if u, err := url.Parse(line); err == nil {
+				line = u.Host
+			}
+		}
+
+		lineArgs := strings.SplitN(line, ":", 2)
+		if len(lineArgs) != 2 {
+			continue
+		}
+		if portList, found := ipInfoMap.Get(lineArgs[0]); found {
+			portListSlice := portList.([]string)
+			portListSlice = append(portListSlice, lineArgs[1])
+			ipInfoMap.Put(lineArgs[0], portListSlice)
+		} else {
+			ipInfoMap.Put(lineArgs[0], []string{lineArgs[1]})
+		}
+	}
 }
